@@ -91,7 +91,7 @@ def create_dashboard():
         "ICU Stays",
         "Diagnoses Explorer",
         "Procedures Analysis",
-       # "Laboratory Results",
+        "Laboratory Results",
         "Medication Analysis"
     ]
     
@@ -562,54 +562,69 @@ def laboratory_page(data_dict):
     category_counts.columns = ['Category', 'Count']
     
     fig = px.pie(category_counts, values='Count', names='Category',
-                color_discrete_sequence=px.colors.qualitative.Bold)
+                 color_discrete_sequence=px.colors.qualitative.Bold)
     fig.update_traces(textposition='inside', textinfo='percent+label')
     fig.update_layout(height=500)
     st.plotly_chart(fig, use_container_width=True)
     
     st.markdown("---")
-    
     st.subheader("Laboratory Test Explorer")
     
     col1, col2 = st.columns([1, 3])
     
-    with col1:
-        selected_category = st.selectbox("Select lab category:", 
-                                        sorted(d_labitems['CATEGORY'].unique()))
-        
-        category_items = d_labitems[d_labitems['CATEGORY'] == selected_category]
-        
-        test_counts = merged_lab[merged_lab['CATEGORY'] == selected_category]['LABEL'].value_counts().nlargest(30)
-        
-        selected_test = st.selectbox("Select lab test:", 
-                                    test_counts.index.tolist())
+    # --- Precompute valid categories with sufficient test data ---
+    merged_lab_numeric = merged_lab[merged_lab['VALUENUM'].notnull()]
+    valid_categories = []
+
+    for category in sorted(d_labitems['CATEGORY'].dropna().unique()):
+        tests_in_cat = merged_lab_numeric[merged_lab_numeric['CATEGORY'] == category]
+        test_counts = tests_in_cat['LABEL'].value_counts()
+        valid_tests = test_counts[test_counts > 10]
+        if not valid_tests.empty:
+            valid_categories.append(category)
     
+    with col1:
+        if not valid_categories:
+            st.warning("No laboratory categories with sufficient numeric test data available.")
+            return
+        
+        selected_category = st.selectbox("Select lab category:", valid_categories)
+
+        valid_tests = merged_lab_numeric[(merged_lab_numeric['CATEGORY'] == selected_category)]
+        test_counts = valid_tests['LABEL'].value_counts()
+        valid_tests_list = test_counts[test_counts > 10].index.tolist()
+
+        selected_test = st.selectbox("Select lab test:", valid_tests_list)
+
     with col2:
         selected_lab_data = merged_lab[(merged_lab['LABEL'] == selected_test) & 
-                                      (merged_lab['VALUENUM'].notnull()) &
-                                      (merged_lab['VALUENUM'] < merged_lab['VALUENUM'].quantile(0.99)) &
-                                      (merged_lab['VALUENUM'] > merged_lab['VALUENUM'].quantile(0.01))]
+                                       (merged_lab['VALUENUM'].notnull()) &
+                                       (merged_lab['VALUENUM'] < merged_lab['VALUENUM'].quantile(0.99)) &
+                                       (merged_lab['VALUENUM'] > merged_lab['VALUENUM'].quantile(0.01))]
         
-        units = selected_lab_data['VALUEUOM'].mode()[0] if not selected_lab_data.empty else ""
-        
-        fig = px.histogram(selected_lab_data, x='VALUENUM', nbins=50,
-                          labels={'VALUENUM': f'Value ({units})'},
-                          title=f"Distribution of {selected_test} values")
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        normal_abnormal = selected_lab_data['FLAG'].value_counts().reset_index()
-        normal_abnormal.columns = ['Flag', 'Count']
-        if not normal_abnormal.empty:
-            fig = px.pie(normal_abnormal, values='Count', names='Flag',
-                        title=f"Distribution of Normal vs Abnormal Results for {selected_test}",
-                        color_discrete_sequence=px.colors.qualitative.Safe)
-            fig.update_traces(textposition='inside', textinfo='percent+label')
+        if not selected_lab_data.empty:
+            units = selected_lab_data['VALUEUOM'].mode()[0] if not selected_lab_data['VALUEUOM'].isna().all() else ""
+            
+            fig = px.histogram(selected_lab_data, x='VALUENUM', nbins=50,
+                               labels={'VALUENUM': f'Value ({units})'},
+                               title=f"Distribution of {selected_test} values")
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
+            
+            if 'FLAG' in selected_lab_data.columns and selected_lab_data['FLAG'].notnull().sum() > 0:
+                normal_abnormal = selected_lab_data['FLAG'].value_counts().reset_index()
+                normal_abnormal.columns = ['Flag', 'Count']
+                
+                fig = px.pie(normal_abnormal, values='Count', names='Flag',
+                             title=f"Distribution of Normal vs Abnormal Results for {selected_test}",
+                             color_discrete_sequence=px.colors.qualitative.Safe)
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info(f"Insufficient data for {selected_test}")
     
     st.markdown("---")
-    
     st.subheader("Abnormal Lab Results by ICU Unit")
     
     selected_lab_data = merged_lab[merged_lab['LABEL'] == selected_test]
@@ -619,18 +634,22 @@ def laboratory_page(data_dict):
     
     lab_with_patient = selected_lab_data.merge(patients[['SUBJECT_ID', 'GENDER']], on='SUBJECT_ID', how='left')
     lab_with_icu = lab_with_patient.merge(icustays[['SUBJECT_ID', 'HADM_ID', 'FIRST_CAREUNIT']], 
-                                        on=['SUBJECT_ID', 'HADM_ID'], how='inner')
+                                          on=['SUBJECT_ID', 'HADM_ID'], how='inner')
     
-    abnormal_by_unit = lab_with_icu[lab_with_icu['FLAG'].notnull()].groupby(['FIRST_CAREUNIT', 'FLAG']).size().reset_index()
-    abnormal_by_unit.columns = ['ICU Unit', 'Flag', 'Count']
-    
-    if not abnormal_by_unit.empty:
-        fig = px.bar(abnormal_by_unit, x='ICU Unit', y='Count', color='Flag',
-                    barmode='group', title=f"Abnormal {selected_test} Results by ICU Unit")
-        fig.update_layout(height=500)
-        st.plotly_chart(fig, use_container_width=True)
+    if 'FLAG' in lab_with_icu.columns and lab_with_icu['FLAG'].notnull().sum() > 0:
+        abnormal_by_unit = lab_with_icu[lab_with_icu['FLAG'].notnull()] \
+            .groupby(['FIRST_CAREUNIT', 'FLAG']).size().reset_index()
+        abnormal_by_unit.columns = ['ICU Unit', 'Flag', 'Count']
+        
+        if not abnormal_by_unit.empty and len(abnormal_by_unit) > 1:
+            fig = px.bar(abnormal_by_unit, x='ICU Unit', y='Count', color='Flag',
+                         barmode='group', title=f"Abnormal {selected_test} Results by ICU Unit")
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Insufficient data to show abnormal results by ICU unit for this test.")
     else:
-        st.info("Insufficient data to show abnormal results by ICU unit for this test.")
+        st.info("No abnormal flags data available for ICU analysis.")
 
 def medication_page(data_dict):
     st.header("💊 Medication Analysis")
