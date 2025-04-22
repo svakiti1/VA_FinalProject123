@@ -91,7 +91,7 @@ def create_dashboard():
         "ICU Stays",
         "Diagnoses Explorer",
         "Procedures Analysis",
-        "Laboratory Results",
+       # "Laboratory Results",
         "Medication Analysis"
     ]
     
