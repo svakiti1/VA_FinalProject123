@@ -21,8 +21,8 @@
 ## ✨ Overview
 
 This **Streamlit** application delivers a dynamic and visually engaging interface for exploring the **MIMIC-III** dataset. Leverage ready-made charts, interactive filters, and data summaries to gain insights into patient demographics, hospital admissions, ICU stays, diagnoses, procedures, lab results, and medication patterns.
-streamlit dashboard deployed using AWS [url](http://18.223.157.123:8501)
 Streamlit dashboard deployed using Streamlit Community Cloud [url](https://mimiciii.streamlit.app)
+streamlit dashboard deployed using AWS [url](http://18.223.157.123:8501)
 ---
 
 ## 🚀 Features
